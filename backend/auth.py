@@ -3,10 +3,8 @@ from jose import jwt
 import requests
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from config import AUTH0_DOMAIN, API_AUDIENCE, ALGORITHMS
 
-AUTH0_DOMAIN = "dev-lgjtqkcbt2po3fk1.us.auth0.com"  # e.g. dev-xyz.us.auth0.com
-API_AUDIENCE = "https://dev-lgjtqkcbt2po3fk1.us.auth0.com/api/v2/"  # Same as audience
-ALGORITHMS = ["RS256"]
 
 bearer_scheme = HTTPBearer()
 

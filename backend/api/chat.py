@@ -1,18 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 from auth import verify_token
-from azure_client import project
+from schemas.chat import ChatRequest, MessagesResponse
+from clients.azure import project
 from config import AGENT_ID
 from azure.ai.agents.models import MessageRole, ListSortOrder
-from threads import get_or_create_thread
-from threads import user_threads
+from services.threads import get_or_create_thread
+from services.threads import user_threads
 
 router = APIRouter()
-
-agent = project.agents.get_agent(AGENT_ID)
-
-class ChatRequest(BaseModel):
-    message: str
 
 
 @router.post("/chat")
@@ -28,7 +23,7 @@ def chat_with_agent(request: ChatRequest, user=Depends(verify_token)):
 
     run = project.agents.runs.create_and_process(
         thread_id=thread_id,
-        agent_id=agent.id
+        agent_id=AGENT_ID
     )
 
     if run.status == "failed":
@@ -55,7 +50,7 @@ def get_all_messages(user=Depends(verify_token)):
     # Check for an existing thread (don't create one here)
     thread_id = user_threads.get(user_id)
     if not thread_id:
-        return []
+        return MessagesResponse(messages=[])
 
     all_msgs = project.agents.messages.list(thread_id=thread_id, order=ListSortOrder.ASCENDING)
 
@@ -66,4 +61,4 @@ def get_all_messages(user=Depends(verify_token)):
             role = msg.role.title()
             result.append({"role": role, "text": content})
 
-    return {"messages": result}
+    return MessagesResponse(messages=result)

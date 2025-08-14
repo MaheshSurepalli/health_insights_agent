@@ -2,11 +2,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from uuid import uuid4
 from auth import verify_token
-from models import StartUploadRequest, StartUploadResponse, AnalyzeRequest, AnalyzeResponse
+from schemas.reports import (StartUploadRequest, StartUploadResponse, AnalyzeRequest, AnalyzeResponse)
 from config import ACCEPTED_MIME
-from storage import create_blob_sas, build_read_sas_url
-from di_client import analyze_blob_url
-from analysis_llm import analyze_with_agent
+from services.storage import create_blob_sas, build_read_sas_url
+from services.document_intelligence import analyze_blob_url
+from services.analysis import analyze_with_agent
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -27,11 +27,9 @@ def analyze_report(req: AnalyzeRequest, user=Depends(verify_token)):
 
         source_url = str(req.blobUrl)
 
-        # 1) DI (already implemented)
-        read_url = build_read_sas_url(source_url, minutes=10)  # :contentReference[oaicite:9]{index=9}
-        extracted = analyze_blob_url(read_url)                  # :contentReference[oaicite:10]{index=10}
+        read_url = build_read_sas_url(source_url, minutes=10)  
+        extracted = analyze_blob_url(read_url)               
 
-        # 2) LLM (new)
         user_id = user["sub"]
         analysis = analyze_with_agent(user_id, extracted)
 
@@ -39,7 +37,7 @@ def analyze_report(req: AnalyzeRequest, user=Depends(verify_token)):
             reportId=request_id,
             blobUrl=source_url,
             extracted=extracted,
-            analysis=analysis,   # <-- NEW
+            analysis=analysis,   
         )
     except HTTPException:
         raise
