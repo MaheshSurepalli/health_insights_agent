@@ -1,0 +1,13 @@
+python-dotenv 
+azure-identity
+azure-ai-projects
+azure-storage-blob>=12.20.0
+azure-ai-documentintelligence>=1.0.0
+
+# FastAPI + Server
+fastapi
+uvicorn
+
+# Auth0 JWT Validation
+python-jose
+requests
