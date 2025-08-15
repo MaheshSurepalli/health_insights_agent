@@ -23,7 +23,7 @@ ALLOWED_ORIGINS = [
 ]
 
 AZURE_ENDPOINT = "https://health-insights-agent-resource.services.ai.azure.com/api/projects/health-insights-agent"
-AGENT_ID = "asst_7AweWe7m4r7h1mPQebEPRTPi"
+AGENT_ID = "asst_iaQUosrYZqLhW1H3cwZJzHi9"
 
 DOCINT_ENDPOINT = os.getenv("DOCINT_ENDPOINT", "")
 DOCINT_KEY = os.getenv("DOCINT_KEY", "") 

@@ -13,5 +13,3 @@ class MessageItem(BaseModel):
     role: str
     text: str
 
-class MessagesResponse(BaseModel):
-    messages: List[MessageItem]

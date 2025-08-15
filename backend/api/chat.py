@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from auth import verify_token
-from schemas.chat import ChatRequest, MessagesResponse
+from schemas.chat import ChatRequest
 from clients.azure import project
 from config import AGENT_ID
 from azure.ai.agents.models import MessageRole, ListSortOrder
@@ -23,7 +23,13 @@ def chat_with_agent(request: ChatRequest, user=Depends(verify_token)):
 
     run = project.agents.runs.create_and_process(
         thread_id=thread_id,
-        agent_id=AGENT_ID
+        agent_id=AGENT_ID,
+        additional_instructions=(
+            "MODE: CHAT. Answer conversationally and briefly. "
+            "Do NOT use the analysis section headings. "
+            "Refer to the most recent analysis in this thread only if helpful. "
+            "Keep responses concise (a few sentences or short bullets)."
+        ),
     )
 
     if run.status == "failed":
@@ -49,16 +55,19 @@ def get_all_messages(user=Depends(verify_token)):
 
     # Check for an existing thread (don't create one here)
     thread_id = user_threads.get(user_id)
+    result = []
     if not thread_id:
-        return MessagesResponse(messages=[])
+        return result
 
     all_msgs = project.agents.messages.list(thread_id=thread_id, order=ListSortOrder.ASCENDING)
 
-    result = []
-    for msg in all_msgs:
+    
+    for idx, msg in enumerate(all_msgs):
+        if idx == 0:
+            continue
         if msg.text_messages:
             content = msg.text_messages[-1].text.value.strip()
             role = msg.role.title()
             result.append({"role": role, "text": content})
 
-    return MessagesResponse(messages=result)
+    return result

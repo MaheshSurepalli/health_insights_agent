@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 class StartUploadRequest(BaseModel):
     filename: str
-    content_type: str = Field
+    content_type: str
 
 class StartUploadResponse(BaseModel):
     sas_url: str = Field(alias="sasUrl")
@@ -16,7 +16,7 @@ class AnalyzeRequest(BaseModel):
     mimeType: Optional[str] = None
 
 class AnalyzeResponse(BaseModel):
-    report_id: str = Field(alias="reportId")
-    blob_url: str = Field(alias="blobUrl")
+    reportId: str
+    blobUrl: str
     extracted: Dict[str, Any]
-    analysis: Dict[str, Any]
+    analysis: str
