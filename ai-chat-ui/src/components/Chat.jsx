@@ -1,3 +1,4 @@
+// src/components/Chat.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, Input, Button, Spin } from "antd";
 import ReactMarkdown from "react-markdown";
@@ -6,12 +7,11 @@ import remarkGfm from "remark-gfm";
 const { TextArea } = Input;
 
 export default function Chat({ messages = [], loading = false, disabled = false, onSend }) {
-  // normalize roles and drop empty texts
   const msgs = useMemo(
     () =>
       (Array.isArray(messages) ? messages : [])
-        .filter(m => (m?.text || "").trim() !== "")
-        .map(m => ({ ...m, role: (m?.role || "").toLowerCase() })),
+        .filter((m) => (m?.text || "").trim() !== "")
+        .map((m) => ({ ...m, role: (m?.role || "").toLowerCase() })),
     [messages]
   );
 
@@ -31,8 +31,7 @@ export default function Chat({ messages = [], loading = false, disabled = false,
   };
 
   return (
-    <Card title="Chat" bordered style={{ marginTop: 12, display: "flex", flexDirection: "column", height: 480 }}>
-      {/* Messages */}
+    <Card title="Chat" style={{ display: "flex", flexDirection: "column", height: 520 }}>
       <div
         ref={listRef}
         style={{
@@ -57,17 +56,18 @@ export default function Chat({ messages = [], loading = false, disabled = false,
                   color: isUser ? "#fff" : "inherit",
                 }}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {m.text}
-                </ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
               </div>
             </div>
           );
         })}
-        {loading && <div style={{ textAlign: "center", color: "#999" }}><Spin size="small" /> &nbsp;Thinking…</div>}
+        {loading && (
+          <div style={{ textAlign: "center", color: "#999" }}>
+            <Spin size="small" /> &nbsp;Loading…
+          </div>
+        )}
       </div>
 
-      {/* Input */}
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <TextArea
           value={value}

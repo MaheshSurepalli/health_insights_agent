@@ -1,20 +1,14 @@
 // src/App.jsx
-import * as React from "react";
-import { useMemo, useState, useCallback } from "react";
-import {
-  Container,
-  Stack,
-  Button,
-  CssBaseline,
-  Paper,
-  Typography,
-} from "@mui/material";
-import Header from "./components/Header.jsx";
+import React, { useMemo, useState } from "react";
+import { Layout, Button, Card, Spin, Flex } from "antd";
+import HeaderBar from "./components/Header.jsx";
 import UploadPanel from "./components/UploadPanel.jsx";
 import Chat from "./components/Chat.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import { createApi } from "./lib/api.js";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+const { Content } = Layout;
 
 export default function App() {
   const {
@@ -22,164 +16,111 @@ export default function App() {
     isLoading: authLoading,
     loginWithRedirect,
     getAccessTokenSilently,
-    user, // 👈 need this to scope localStorage by user
   } = useAuth0();
 
   const api = useMemo(() => createApi(getAccessTokenSilently), [getAccessTokenSilently]);
   const qc = useQueryClient();
 
-  // Local UI state
-  const [canChat, setCanChat] = useState(false);
-  const [uploadLocked, setUploadLocked] = useState(false);
+  // Blob chosen & uploaded (ready for analysis)
   const [lastBlob, setLastBlob] = useState(null); // { blobUrl, mimeType }
 
-  // Key in localStorage that is unique per user
-  const ANALYSIS_KEY = useMemo(
-    () => (user?.sub ? `hasAnalysis:${user.sub}` : null),
-    [user?.sub]
-  );
-
-  // Detect an analysis message by looking for a Markdown "Summary" heading in an assistant reply
-  const detectAnalysis = useCallback((msgs) => {
-    const arr = Array.isArray(msgs) ? msgs : [];
-    return arr.some(
-      (m) =>
-        String(m?.role || "").toLowerCase() === "assistant" &&
-        /(^|\n)#{1,6}\s*summary\b/i.test(String(m?.text || ""))
-    );
-  }, []);
-
-  // 1) Load messages (backend returns a plain array)
+  // Fetch messages. This is the single source of truth for UI state.
   const messagesQ = useQuery({
     queryKey: ["messages"],
-    queryFn: () => api.listMessages(), // -> Promise<Message[]>
+    queryFn: () => api.listMessages(), // -> Message[]
     enabled: isAuthenticated,
     initialData: [],
-    onSuccess: (msgs) => {
-      const analyzed = detectAnalysis(msgs);
-
-      setCanChat(analyzed);
-      setUploadLocked(analyzed);
-
-      // Persist or clear the per-user flag
-      if (ANALYSIS_KEY) {
-        if (analyzed) {
-          localStorage.setItem(ANALYSIS_KEY, "1");
-        } else {
-          localStorage.removeItem(ANALYSIS_KEY);
-        }
-      }
-    },
   });
 
-  // Also honor the per-user persisted flag immediately after login (before messages arrive)
-  React.useEffect(() => {
-    if (!isAuthenticated || !ANALYSIS_KEY) return;
-    const stored = localStorage.getItem(ANALYSIS_KEY) === "1";
-    if (stored) {
-      setCanChat(true);
-      setUploadLocked(true);
-    } else {
-      setCanChat(false);
-      setUploadLocked(false);
-    }
-  }, [isAuthenticated, ANALYSIS_KEY]);
+  const messages = messagesQ.data || [];
+  const messageCount = Array.isArray(messages) ? messages.length : 0;
 
-  // 2) Send chat with optimistic update
+  // UI derivation (DRY):
+  // - First login (no history): messageCount === 0 → show Upload; Chat disabled
+  // - After analysis: messageCount > 0 → hide Upload; Chat enabled
+  const showUpload = isAuthenticated && messageCount === 0;
+  const chatDisabled = messageCount === 0;
+
+  // Chat mutation (optimistic)
   const chatM = useMutation({
     mutationFn: (text) => api.sendChat(text),
     onMutate: async (text) => {
       await qc.cancelQueries({ queryKey: ["messages"] });
-      const prev = qc.getQueryData(["messages"]);
-      qc.setQueryData(["messages"], [...(prev || []), { role: "user", text }]);
+      const prev = qc.getQueryData(["messages"]) || [];
+      qc.setQueryData(["messages"], [...prev, { role: "user", text }]);
       return { prev };
     },
     onSuccess: (res) => {
-      qc.setQueryData(["messages"], (prev) => [
-        ...(prev || []),
-        { role: "assistant", text: res.agent_reply },
-      ]);
+      qc.setQueryData(["messages"], (prev = []) => [...prev, { role: "assistant", text: res.agent_reply }]);
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) qc.setQueryData(["messages"], ctx.prev);
+    onError: (_e, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["messages"], ctx.prev);
     },
   });
 
-  // 3) Analyze (push full Markdown; lock upload + enable chat; persist per-user)
+  // Analyze mutation
   const analyzeM = useMutation({
-    mutationFn: () =>
-      api.analyze({ blobUrl: lastBlob.blobUrl, mimeType: lastBlob.mimeType }),
+    mutationFn: () => api.analyze({ blobUrl: lastBlob.blobUrl, mimeType: lastBlob.mimeType }),
     onSuccess: (res) => {
       const markdown = typeof res?.analysis === "string" ? res.analysis : "";
-      qc.setQueryData(["messages"], (prev = []) => [
-        ...(Array.isArray(prev) ? prev : []),
-        { role: "assistant", text: markdown },
-      ]);
-
-      setCanChat(true);
-      setUploadLocked(true);
-      if (ANALYSIS_KEY) localStorage.setItem(ANALYSIS_KEY, "1");
+      qc.setQueryData(["messages"], (prev = []) => [...prev, { role: "assistant", text: markdown }]);
     },
     onError: (e) => {
       qc.setQueryData(["messages"], (prev = []) => [
-        ...(Array.isArray(prev) ? prev : []),
+        ...prev,
         { role: "assistant", text: `Sorry—analysis failed.\n\n${e?.message || ""}` },
       ]);
     },
   });
 
-  // 4) Upload helpers
-  const startUpload = async ({ filename, content_type }) =>
-    api.startUpload({ filename, content_type });
+  // Upload helpers
+  const startUpload = async ({ filename, content_type }) => api.startUpload({ filename, content_type });
+  const onUploaded = ({ file, blobUrl }) => setLastBlob({ blobUrl, mimeType: file.type });
 
-  const onUploaded = ({ file, blobUrl }) => {
-    setLastBlob({ blobUrl, mimeType: file.type });
-    // Keep chat locked until analysis completes
-    setCanChat(false);
-  };
+  if (authLoading) {
+    return (
+      <Flex style={{ height: "100vh" }} align="center" justify="center">
+        <Spin size="large" />
+      </Flex>
+    );
+    }
 
-  if (authLoading) return <div style={{ padding: 32 }}>Loading…</div>;
-
-  return (
-    <React.Fragment>
-      <CssBaseline />
-      <Container
-        maxWidth="md"
-        sx={{ py: 2, minHeight: "100vh", display: "flex", flexDirection: "column" }}
-      >
-        {!isAuthenticated ? (
-          <Paper sx={{ p: 4, textAlign: "center" }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>
-              Welcome to Health Insights
-            </Typography>
-            <Button variant="contained" onClick={() => loginWithRedirect()}>
+  if (!isAuthenticated) {
+    return (
+      <Flex style={{ height: "100vh" }} align="center" justify="center">
+        <Card>
+          <Flex vertical gap={12} align="center">
+            <h3>Welcome to Health Insights</h3>
+            <Button type="primary" onClick={() => loginWithRedirect()}>
               Log In
             </Button>
-          </Paper>
-        ) : (
-          <Stack sx={{ gap: 2, flex: 1 }}>
-            <Header />
-            {!uploadLocked && (
-              <UploadPanel
-                startUpload={startUpload}
-                onUploaded={onUploaded}
-                onAnalyze={() => analyzeM.mutate()}
-              />
-            )}
-            <Chat
-              messages={messagesQ.data || []}
-              loading={
-                messagesQ.isPending ||
-                messagesQ.isLoading ||
-                chatM.isPending ||
-                analyzeM.isPending
-              }
-              disabled={!canChat}
-              onSend={(text) => chatM.mutate(text)}
-            />
-          </Stack>
+          </Flex>
+        </Card>
+      </Flex>
+    );
+  }
+
+  return (
+    <Layout style={{ minHeight: "100vh" }}>
+      <HeaderBar />
+      <Content style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 960, margin: "0 auto", width: "100%" }}>
+        {/* First login → show Upload; Chat disabled */}
+        {showUpload && (
+          <UploadPanel
+            startUpload={startUpload}
+            onUploaded={onUploaded}
+            onAnalyze={() => analyzeM.mutate()}
+          />
         )}
-      </Container>
-    </React.Fragment>
+
+        {/* Chat always present (disabled until analysis exists) */}
+        <Chat
+          messages={messages}
+          loading={messagesQ.isLoading || chatM.isPending || analyzeM.isPending}
+          disabled={chatDisabled}
+          onSend={(text) => chatM.mutate(text)}
+        />
+      </Content>
+    </Layout>
   );
 }
