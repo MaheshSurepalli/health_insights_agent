@@ -1,10 +1,13 @@
-// Small, typed-ish API client wrapping fetch with Auth0 token.
+// src/lib/api.js
 export function createApi(getAccessTokenSilently) {
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
+  if (!API_BASE) throw new Error("VITE_API_BASE not set");
+
+  const join = (b, p) => `${b.replace(/\/+$/, "")}${p.startsWith("/") ? p : "/" + p}`;
 
   async function authedFetch(path, init = {}) {
     const token = await getAccessTokenSilently();
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(join(API_BASE, path), {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -12,29 +15,30 @@ export function createApi(getAccessTokenSilently) {
         ...(init.headers || {}),
       },
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}${text ? ` – ${text}` : ""}`);
+    }
     return res;
   }
 
   return {
-    // chat
     async listMessages() {
       const r = await authedFetch("/messages", { method: "GET" });
-      return r.json(); // { messages:[{role,text}] }
+      const data = await r.json();
+      return Array.isArray(data) ? data : (data?.messages ?? []);
     },
     async sendChat(message) {
       const r = await authedFetch("/chat", {
         method: "POST",
         body: JSON.stringify({ message }),
       });
-      return r.json(); // { thread_id, agent_reply }
+      return r.json(); // { agent_reply }
     },
-
-    // reports
     async startUpload({ filename, content_type }) {
       const r = await authedFetch("/reports/upload-url", {
         method: "POST",
-        body: JSON.stringify({ filename, content_type }),
+        body: JSON.stringify({ filename, content_type: content_type || "application/octet-stream" }),
       });
       return r.json(); // { sasUrl, blobUrl }
     },
@@ -43,25 +47,7 @@ export function createApi(getAccessTokenSilently) {
         method: "POST",
         body: JSON.stringify({ blobUrl, mimeType }),
       });
-      return r.json(); // AnalyzeResponse
+      return r.json(); // { analysis }
     },
   };
-}
-
-// Azure Blob PUT with progress (XHR = best for progress events)
-export function putToSasUrl(sasUrl, file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", sasUrl, true);
-    xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    };
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || `Upload error ${xhr.status}`)));
-    xhr.onerror = () => reject(new Error("Network error while uploading"));
-    xhr.send(file);
-  });
 }

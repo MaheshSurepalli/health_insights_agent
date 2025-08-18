@@ -1,9 +1,9 @@
 // src/App.jsx
 import React, { useMemo, useState } from "react";
-import { Layout, Button, Card, Spin, Flex } from "antd";
+import { Layout, Button, Card, Spin, Flex, App as AntApp } from "antd";
 import HeaderBar from "./components/Header.jsx";
-import UploadPanel from "./components/UploadPanel.jsx";
-import Chat from "./components/Chat.jsx";
+import ReportIntake from "./components/ReportIntake.jsx";
+import ChatPane from "./components/ChatPane.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import { createApi } from "./lib/api.js";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,31 +17,26 @@ export default function App() {
     loginWithRedirect,
     getAccessTokenSilently,
   } = useAuth0();
+  const { message } = AntApp.useApp ? AntApp.useApp() : { message: { success() {}, error() {} }};
 
   const api = useMemo(() => createApi(getAccessTokenSilently), [getAccessTokenSilently]);
   const qc = useQueryClient();
 
-  // Blob chosen & uploaded (ready for analysis)
+  // Remember the blob we just uploaded (for /analyze)
   const [lastBlob, setLastBlob] = useState(null); // { blobUrl, mimeType }
 
-  // Fetch messages. This is the single source of truth for UI state.
+  // Single source of truth for UI state
   const messagesQ = useQuery({
     queryKey: ["messages"],
-    queryFn: () => api.listMessages(), // -> Message[]
+    queryFn: () => api.listMessages(),
     enabled: isAuthenticated,
     initialData: [],
   });
 
   const messages = messagesQ.data || [];
-  const messageCount = Array.isArray(messages) ? messages.length : 0;
+  const hasMessages = Array.isArray(messages) && messages.length > 0;
 
-  // UI derivation (DRY):
-  // - First login (no history): messageCount === 0 → show Upload; Chat disabled
-  // - After analysis: messageCount > 0 → hide Upload; Chat enabled
-  const showUpload = isAuthenticated && messageCount === 0;
-  const chatDisabled = messageCount === 0;
-
-  // Chat mutation (optimistic)
+  // Chat
   const chatM = useMutation({
     mutationFn: (text) => api.sendChat(text),
     onMutate: async (text) => {
@@ -51,31 +46,44 @@ export default function App() {
       return { prev };
     },
     onSuccess: (res) => {
-      qc.setQueryData(["messages"], (prev = []) => [...prev, { role: "assistant", text: res.agent_reply }]);
+      qc.setQueryData(["messages"], (prev = []) => [
+        ...prev,
+        { role: "assistant", text: res.agent_reply },
+      ]);
     },
     onError: (_e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(["messages"], ctx.prev);
+      message.error("Failed to send message.");
     },
   });
 
-  // Analyze mutation
+  // Analyze → append assistant markdown; Upload card will hide automatically (hasMessages becomes true)
   const analyzeM = useMutation({
     mutationFn: () => api.analyze({ blobUrl: lastBlob.blobUrl, mimeType: lastBlob.mimeType }),
     onSuccess: (res) => {
       const markdown = typeof res?.analysis === "string" ? res.analysis : "";
-      qc.setQueryData(["messages"], (prev = []) => [...prev, { role: "assistant", text: markdown }]);
+      qc.setQueryData(["messages"], (prev = []) => [
+        ...prev,
+        { role: "assistant", text: markdown },
+      ]);
+      message.success("Analysis complete.");
     },
     onError: (e) => {
       qc.setQueryData(["messages"], (prev = []) => [
         ...prev,
         { role: "assistant", text: `Sorry—analysis failed.\n\n${e?.message || ""}` },
       ]);
+      message.error("Analysis failed.");
     },
   });
 
-  // Upload helpers
-  const startUpload = async ({ filename, content_type }) => api.startUpload({ filename, content_type });
-  const onUploaded = ({ file, blobUrl }) => setLastBlob({ blobUrl, mimeType: file.type });
+  const startUpload = async ({ filename, content_type }) =>
+    api.startUpload({ filename, content_type });
+
+  const onUploaded = ({ file, blobUrl }) => {
+    setLastBlob({ blobUrl, mimeType: file.type });
+  };
+
 
   if (authLoading) {
     return (
@@ -83,7 +91,7 @@ export default function App() {
         <Spin size="large" />
       </Flex>
     );
-    }
+  }
 
   if (!isAuthenticated) {
     return (
@@ -101,25 +109,43 @@ export default function App() {
   }
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout style={{ height: "100vh" }}>
       <HeaderBar />
-      <Content style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 960, margin: "0 auto", width: "100%" }}>
-        {/* First login → show Upload; Chat disabled */}
-        {showUpload && (
-          <UploadPanel
-            startUpload={startUpload}
-            onUploaded={onUploaded}
-            onAnalyze={() => analyzeM.mutate()}
-          />
-        )}
+      <Content style={{ padding: 16, display: "flex", overflow: "hidden" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            width: "100%",
+            maxWidth: 960,
+            margin: "0 auto",
+            minHeight: 0,
+            flex: 1,
+          }}
+        >
+          {/* FIRST LOGIN (no messages): Upload & Analyze only */}
+          {!hasMessages && (
+            <ReportIntake
+              startUpload={startUpload}
+              onUploaded={onUploaded}
+              onAnalyze={() => analyzeM.mutate()}
+              analyzing={analyzeM.isPending}
+            />
+          )}
 
-        {/* Chat always present (disabled until analysis exists) */}
-        <Chat
-          messages={messages}
-          loading={messagesQ.isLoading || chatM.isPending || analyzeM.isPending}
-          disabled={chatDisabled}
-          onSend={(text) => chatM.mutate(text)}
-        />
+          {/* AFTER ANALYZE (has messages): Chat only */}
+          {hasMessages && (
+            <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
+              <ChatPane
+                messages={messages}
+                sending={chatM.isPending}
+                loading={messagesQ.isLoading || analyzeM.isPending}
+                onSend={(text) => chatM.mutate(text)}
+              />
+            </div>
+          )}
+        </div>
       </Content>
     </Layout>
   );
