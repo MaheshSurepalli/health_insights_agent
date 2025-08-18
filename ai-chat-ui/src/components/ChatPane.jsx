@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from "react";
 import { Bubble, Sender } from "@ant-design/x";
 import MarkdownIt from "markdown-it";
+import { Grid } from "antd";
 
 /**
  * messages: [{ role: 'user'|'assistant', text: string }]
@@ -10,7 +11,7 @@ import MarkdownIt from "markdown-it";
  * onSend:  (text: string) => void
  */
 export default function ChatPane({ messages = [], sending = false, loading = false, onSend }) {
-  // Markdown renderer for assistant messages
+  // Markdown renderer for assistant content
   const md = useMemo(
     () =>
       new MarkdownIt({
@@ -21,7 +22,7 @@ export default function ChatPane({ messages = [], sending = false, loading = fal
     []
   );
 
-  // Map backend messages -> Bubble.List items
+  // Map backend messages -> Bubble.List items (content only; visuals come from roles)
   const items = useMemo(() => {
     const arr = Array.isArray(messages) ? messages : [];
     return arr
@@ -31,54 +32,81 @@ export default function ChatPane({ messages = [], sending = false, loading = fal
         const isUser = role === "user";
         const content = String(m.text || "");
 
-        const node = isUser ? (
-          content
-        ) : (
-          <div dangerouslySetInnerHTML={{ __html: md.render(content) }} />
-        );
-
         return {
           key: idx,
           role,
-          placement: isUser ? "end" : "start",
-          variant: isUser ? "filled" : "borderless",
-          content: node,
+          content: isUser ? (
+            content
+          ) : (
+            <div
+              className="chat-md"
+              // If you want stricter sanitization, run through DOMPurify here.
+              dangerouslySetInnerHTML={{ __html: md.render(content) }}
+              style={{
+                lineHeight: 1.55,
+                wordBreak: "break-word",
+                overflowWrap: "anywhere",
+                fontSize: 14,
+                // tighten headings inside the bubble
+                // (kept inline so no global CSS needed)
+              }}
+            />
+          ),
         };
       });
   }, [messages, md]);
 
   const [value, setValue] = useState("");
+  const screens = Grid.useBreakpoint();
+  const pad = screens.xs ? 8 : 12;
 
   return (
     <div
-      // lightweight "card" look without AntD Card (no title/header at all)
+      // Borderless "card" with soft elevation; no visible border around bubbles
       style={{
         display: "flex",
         flexDirection: "column",
         flex: 1,
         minHeight: 0,
-        border: "1px solid #f0f0f0",
-        borderRadius: 8,
-        padding: 12,
-        gap: 8,
+        borderRadius: 12,
         background: "#fff",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
       }}
     >
-      {/* Scrollable chat list */}
+      {/* Scrollable chat list with its own internal padding */}
       <div
         style={{
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
           overflowX: "hidden",
+          padding: pad, // controls the gap between container edges and bubbles
         }}
       >
         <Bubble.List
           items={items}
           autoScroll
           roles={{
-            user: { placement: "end", variant: "filled" },
-            assistant: { placement: "start", variant: "borderless" },
+            user: {
+              placement: "end",
+              variant: "filled",
+              styles: {
+                content: {
+                  background: "#1677ff", // AntD primary
+                  color: "#fff",
+                },
+              },
+            },
+            assistant: {
+              placement: "start",
+              variant: "borderless",
+              styles: {
+                content: {
+                  background: "#f7f8fa", // softer than #f5f5f5
+                  color: "inherit",
+                },
+              },
+            },
           }}
           style={{ minHeight: "100%" }}
         />
@@ -89,19 +117,21 @@ export default function ChatPane({ messages = [], sending = false, loading = fal
         )}
       </div>
 
-      {/* Sender */}
-      <Sender
-        value={value}
-        onChange={setValue}
-        onSubmit={(val) => {
-          const text = String(val || "").trim();
-          if (!text) return;
-          onSend?.(text);
-          setValue("");
-        }}
-        placeholder="Type your message…"
-        sending={sending}
-      />
+      {/* Subtle divider above the sender to visually separate input from messages */}
+      <div style={{ borderTop: "1px solid #f0f0f0", padding: pad }}>
+        <Sender
+          value={value}
+          onChange={setValue}
+          onSubmit={(val) => {
+            const text = String(val || "").trim();
+            if (!text || sending) return;
+            onSend?.(text);
+            setValue("");
+          }}
+          placeholder="Type your message…"
+          loading={sending} // spinner inside the input while sending
+        />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useMemo, useState } from "react";
-import { Layout, Button, Card, Spin, Flex, App as AntApp } from "antd";
+import { Layout, Button, Card, Spin, Flex, Grid } from "antd";
 import HeaderBar from "./components/Header.jsx";
 import ReportIntake from "./components/ReportIntake.jsx";
 import ChatPane from "./components/ChatPane.jsx";
@@ -17,26 +17,31 @@ export default function App() {
     loginWithRedirect,
     getAccessTokenSilently,
   } = useAuth0();
-  const { message } = AntApp.useApp ? AntApp.useApp() : { message: { success() {}, error() {} }};
 
+  const screens = Grid.useBreakpoint();
   const api = useMemo(() => createApi(getAccessTokenSilently), [getAccessTokenSilently]);
   const qc = useQueryClient();
 
-  // Remember the blob we just uploaded (for /analyze)
+  // Saved after file upload, used for /analyze
   const [lastBlob, setLastBlob] = useState(null); // { blobUrl, mimeType }
 
-  // Single source of truth for UI state
+  // Messages are the single source of truth for UI state.
+  // IMPORTANT: no initialData here — we want a real "pending" state on first load.
   const messagesQ = useQuery({
     queryKey: ["messages"],
     queryFn: () => api.listMessages(),
     enabled: isAuthenticated,
-    initialData: [],
+    // Good defaults; tweak as you like:
+    staleTime: 0,
+    refetchOnWindowFocus: false,
   });
 
-  const messages = messagesQ.data || [];
+  // React Query initial loader: true until the first successful response.
+  const isInitialLoading = messagesQ.isInitialLoading || (messagesQ.isLoading && !messagesQ.data);
+  const messages = messagesQ.data ?? [];
   const hasMessages = Array.isArray(messages) && messages.length > 0;
 
-  // Chat
+  // Send chat (optimistic append)
   const chatM = useMutation({
     mutationFn: (text) => api.sendChat(text),
     onMutate: async (text) => {
@@ -53,30 +58,28 @@ export default function App() {
     },
     onError: (_e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(["messages"], ctx.prev);
-      message.error("Failed to send message.");
     },
   });
 
-  // Analyze → append assistant markdown; Upload card will hide automatically (hasMessages becomes true)
+  // Analyze (append assistant markdown; Upload hides automatically as hasMessages flips true)
   const analyzeM = useMutation({
-    mutationFn: () => api.analyze({ blobUrl: lastBlob.blobUrl, mimeType: lastBlob.mimeType }),
+    mutationFn: () => api.analyze({ blobUrl: lastBlob?.blobUrl, mimeType: lastBlob?.mimeType }),
     onSuccess: (res) => {
       const markdown = typeof res?.analysis === "string" ? res.analysis : "";
       qc.setQueryData(["messages"], (prev = []) => [
         ...prev,
         { role: "assistant", text: markdown },
       ]);
-      message.success("Analysis complete.");
     },
     onError: (e) => {
       qc.setQueryData(["messages"], (prev = []) => [
         ...prev,
         { role: "assistant", text: `Sorry—analysis failed.\n\n${e?.message || ""}` },
       ]);
-      message.error("Analysis failed.");
     },
   });
 
+  // Upload helpers
   const startUpload = async ({ filename, content_type }) =>
     api.startUpload({ filename, content_type });
 
@@ -84,7 +87,12 @@ export default function App() {
     setLastBlob({ blobUrl, mimeType: file.type });
   };
 
+  // ---------- RENDER ----------
 
+  const pagePadding = screens.xs ? 8 : screens.md ? 16 : 24;
+  const maxW = screens.xl ? 1200 : 960;
+
+  // Auth loading gate
   if (authLoading) {
     return (
       <Flex style={{ height: "100vh" }} align="center" justify="center">
@@ -93,12 +101,13 @@ export default function App() {
     );
   }
 
+  // Logged-out screen
   if (!isAuthenticated) {
     return (
       <Flex style={{ height: "100vh" }} align="center" justify="center">
         <Card>
           <Flex vertical gap={12} align="center">
-            <h3>Welcome to Health Insights</h3>
+            <h3 style={{ margin: 0 }}>Welcome to Health Insights</h3>
             <Button type="primary" onClick={() => loginWithRedirect()}>
               Log In
             </Button>
@@ -111,39 +120,48 @@ export default function App() {
   return (
     <Layout style={{ height: "100vh" }}>
       <HeaderBar />
-      <Content style={{ padding: 16, display: "flex", overflow: "hidden" }}>
+      <Content style={{ padding: pagePadding, display: "flex", overflow: "hidden" }}>
         <div
           style={{
             display: "flex",
             flexDirection: "column",
             gap: 12,
             width: "100%",
-            maxWidth: 960,
+            maxWidth: maxW,
             margin: "0 auto",
             minHeight: 0,
             flex: 1,
           }}
         >
-          {/* FIRST LOGIN (no messages): Upload & Analyze only */}
-          {!hasMessages && (
-            <ReportIntake
-              startUpload={startUpload}
-              onUploaded={onUploaded}
-              onAnalyze={() => analyzeM.mutate()}
-              analyzing={analyzeM.isPending}
-            />
-          )}
+          {/* INITIAL LOADER: hide Upload/Chat until messages query completes */}
+          {isInitialLoading ? (
+            <Flex style={{ flex: 1 }} align="center" justify="center">
+              <Spin size="large" />
+            </Flex>
+          ) : (
+            <>
+              {/* First-time (no history): Upload only */}
+              {!hasMessages && (
+                <ReportIntake
+                  startUpload={startUpload}
+                  onUploaded={onUploaded}
+                  onAnalyze={() => analyzeM.mutate()}
+                  analyzing={analyzeM.isPending}
+                />
+              )}
 
-          {/* AFTER ANALYZE (has messages): Chat only */}
-          {hasMessages && (
-            <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
-              <ChatPane
-                messages={messages}
-                sending={chatM.isPending}
-                loading={messagesQ.isLoading || analyzeM.isPending}
-                onSend={(text) => chatM.mutate(text)}
-              />
-            </div>
+              {/* After analysis (has messages): Chat only */}
+              {hasMessages && (
+                <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
+                  <ChatPane
+                    messages={messages}
+                    sending={chatM.isPending}
+                    loading={messagesQ.isFetching || analyzeM.isPending}
+                    onSend={(text) => chatM.mutate(text)}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       </Content>

@@ -1,6 +1,6 @@
 // src/components/ReportIntake.jsx
-import React, { useRef, useState } from "react";
-import { Card, Button, Modal, App as AntApp, Flex } from "antd";
+import React, { useState } from "react";
+import { Card, Button, Modal, message, Flex, Grid, Upload } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { Attachments } from "@ant-design/x";
 
@@ -10,12 +10,11 @@ import { Attachments } from "@ant-design/x";
  * onAnalyze:   () => Promise<void>
  */
 export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analyzing }) {
-  const { message } = AntApp.useApp ? AntApp.useApp() : { message: { success() {}, error() {} }};
   const [fileList, setFileList] = useState([]);
   const [preview, setPreview] = useState({ open: false, url: "", title: "" });
   const [blobUrl, setBlobUrl] = useState("");
-
-  const ref = useRef(null);
+  const [msgApi, contextHolder] = message.useMessage();
+  const screens = Grid.useBreakpoint();
 
   const beforeUpload = (file) => {
     const ok =
@@ -24,13 +23,12 @@ export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analy
       file.type === "image/jpeg" ||
       file.type === "image/tiff";
     if (!ok) {
-      message.error("Please select a PDF, PNG, JPEG, or TIFF file.");
-      return Upload.LIST_IGNORE; // same semantics as antd Upload
+      msgApi.error("Please select a PDF, PNG, JPEG, or TIFF file.");
+      return Upload.LIST_IGNORE; // prevents adding to list
     }
     return true;
   };
 
-  // Attachments supports the same Upload props under the hood (per docs)
   const customRequest = async ({ file, onProgress, onError, onSuccess }) => {
     try {
       const { sasUrl, blobUrl: finalBlobUrl } = await startUpload({
@@ -54,42 +52,50 @@ export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analy
           setBlobUrl(finalBlobUrl);
           onUploaded?.({ file, blobUrl: finalBlobUrl });
           onSuccess?.({}, file);
-          message.success("Upload complete.");
+          msgApi.success("Upload complete.");
         } else {
           const err = new Error(xhr.responseText || `Upload error ${xhr.status}`);
           onError?.(err);
-          message.error(err.message);
+          msgApi.error(err.message);
         }
       };
 
       xhr.onerror = () => {
         const err = new Error("Network error during upload");
         onError?.(err);
-        message.error(err.message);
+        msgApi.error(err.message);
       };
 
       xhr.send(file);
     } catch (err) {
       onError?.(err);
-      message.error(err?.message || "Upload failed.");
+      msgApi.error(err?.message || "Upload failed.");
     }
   };
 
   const handlePreview = async (file) => {
-    const url = file.url || file.preview || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : "");
+    const url =
+      file.url ||
+      file.preview ||
+      (file.originFileObj ? URL.createObjectURL(file.originFileObj) : "");
     setPreview({ open: true, url, title: file.name || "Preview" });
   };
 
+  const modalWidth = screens.xs ? "96vw" : screens.md ? 900 : 720;
+
   return (
-    <Card title="Upload a report">
+    <Card title="Upload a report" style={{ width: "100%" }}>
+      {contextHolder}
       <Attachments
-        ref={ref}
         items={fileList}
         onChange={({ fileList: fl }) => setFileList(fl.slice(-1))}
-        // upload behavior (compatible with antd Upload)
         beforeUpload={beforeUpload}
         customRequest={customRequest}
-        showUploadList={{ showPreviewIcon: true, showRemoveIcon: true, showDownloadIcon: false }}
+        showUploadList={{
+          showPreviewIcon: true,
+          showRemoveIcon: true,
+          showDownloadIcon: false,
+        }}
         maxCount={1}
         listType="text"
         onPreview={handlePreview}
@@ -97,9 +103,10 @@ export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analy
           title: "Click or drop files here",
           description: "PDF or image of your lab report",
         }}
+        style={{ width: "100%" }}
       />
 
-      <Flex justify="end" gap={8} style={{ marginTop: 12 }}>
+      <Flex justify="end" gap={8} style={{ marginTop: 12, flexWrap: "wrap" }}>
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}
@@ -119,11 +126,12 @@ export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analy
           if (preview.url?.startsWith("blob:")) URL.revokeObjectURL(preview.url);
           setPreview({ open: false, url: "", title: "" });
         }}
-        width={900}
+        width={modalWidth}
       >
         {preview.url ? (
-          (fileList[0]?.type === "application/pdf" || preview.title?.toLowerCase()?.endsWith(".pdf")) ? (
-            <object data={preview.url} type="application/pdf" width="100%" height="600px">
+          (fileList[0]?.type === "application/pdf" ||
+            preview.title?.toLowerCase()?.endsWith(".pdf")) ? (
+            <object data={preview.url} type="application/pdf" width="100%" height={screens.xs ? "60vh" : "600px"}>
               <p>
                 PDF preview isn’t available here.{" "}
                 <a href={preview.url} target="_blank" rel="noreferrer">
@@ -133,7 +141,7 @@ export default function ReportIntake({ startUpload, onUploaded, onAnalyze, analy
               </p>
             </object>
           ) : (
-            <img alt="preview" src={preview.url} style={{ width: "100%" }} />
+            <img alt="preview" src={preview.url} style={{ width: "100%", height: "auto" }} />
           )
         ) : (
           <div>No preview available.</div>
