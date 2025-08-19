@@ -1,14 +1,15 @@
-name: Build and Push to ACR
+name: Backend - Build & Push to ACR
 
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch: {}
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
-  docker:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,24 +28,12 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      # Backend image (adjust context/dockerfile paths if different)
-      - name: Build & push backend
+      - name: Build & push backend image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./docker/backend.Dockerfile
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:latest
-
-      # Frontend image (adjust context/dockerfile paths if different)
-      - name: Build & push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/frontend.Dockerfile
-          push: true
-          tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/health-insights-frontend:${{ github.sha }}
-            ${{ env.ACR_LOGIN_SERVER }}/health-insights-frontend:latest
