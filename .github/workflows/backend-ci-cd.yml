@@ -1,4 +1,4 @@
-name: Deploy Backend to AKS
+name: Backend — Build & Deploy to AKS
 
 on:
   push:
@@ -6,18 +6,50 @@ on:
     paths:
       - "backend/**"
       - "k8s/**"
-      - ".github/workflows/deploy-backend.yml"
+      - ".github/workflows/backend-ci-cd.yml"
   workflow_dispatch: {}
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:${{ github.sha }}
+            ${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,37 +66,30 @@ jobs:
         with:
           version: 'latest'
 
-      # 1) Ensure namespace, svc, and deployment exist/are updated from repo
-      - name: Apply manifests with Kustomize
-        run: |
-          kubectl apply -k k8s/
+      - name: Apply k8s (namespace, svc, deploy)
+        run: kubectl apply -k k8s/
 
-      # 2) Roll the backend deployment to the image built by this commit
-      - name: Set backend image to this commit
+      - name: Set image to this commit & wait
         run: |
           kubectl -n hia set image deployment/hia-backend \
             api=${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:${{ github.sha }}
-          kubectl -n hia rollout status deployment/hia-backend --timeout=180s
+          kubectl -n hia rollout status deployment/hia-backend --timeout=300s
 
-      # 3) (Optional) Show public IP to help you test
       - name: Show backend public IP
         run: |
           kubectl -n hia get svc hia-backend -o wide
           IP=$(kubectl -n hia get svc hia-backend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Backend EXTERNAL-IP: $IP"
 
-      - name: Debug on failure (pods, events, logs)
+      - name: Debug on failure
         if: failure()
         run: |
           set +e
           kubectl -n hia get pods -o wide
           echo "----- Events -----"
           kubectl -n hia describe deployment hia-backend | sed -n '/Events:/,$p'
-          echo "----- Pod Describes -----"
           for p in $(kubectl -n hia get pods -l app=hia-backend -o name); do
             echo "### $p"
             kubectl -n hia describe $p | sed -n '/Events:/,$p'
+            kubectl -n hia logs $p --tail=200 || true
           done
-          echo "----- Container Logs (last 200 lines) -----"
-          kubectl -n hia logs -l app=hia-backend --tail=200 --all-containers=true
-
