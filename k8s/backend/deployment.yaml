@@ -13,7 +13,10 @@ spec:
     metadata:
       labels:
         app: hia-backend
+      annotations:
+        azure.workload.identity/use: "true"   # optional but harmless
     spec:
+      serviceAccountName: hia-backend-sa      # <— use the SA above
       containers:
         - name: api
           image: hiaacr-abewdkh4fnczddgz.azurecr.io/health-insights-backend:latest
@@ -23,15 +26,13 @@ spec:
           env:
             - name: TZ
               value: "Asia/Kolkata"
+            - name: AZURE_CLIENT_ID            # <— lets DefaultAzureCredential select this MI
+              value: "0902ee40-c72c-4847-9df6-8eff222f54c7"
           readinessProbe:
-            httpGet:
-              path: /docs
-              port: 8080
+            httpGet: { path: /docs, port: 8080 }
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            httpGet:
-              path: /docs
-              port: 8080
+            httpGet: { path: /docs, port: 8080 }
             initialDelaySeconds: 20
             periodSeconds: 20

@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: hia
 resources:
   - namespace.yaml
+  - identity/serviceaccount.yaml     
   - backend/deployment.yaml
   - backend/service.yaml
   - frontend/deployment.yaml
