@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useMemo, useState } from "react";
 import { Layout, Button, Card, Spin, Flex, Grid } from "antd";
 import HeaderBar from "./components/Header.jsx";
