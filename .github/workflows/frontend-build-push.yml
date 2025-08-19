@@ -3,7 +3,15 @@ name: Frontend - Build & Push to ACR
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-build-push.yml"
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
