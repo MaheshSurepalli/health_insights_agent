@@ -8,6 +8,7 @@ from config import AUTH0_DOMAIN, API_AUDIENCE, ALGORITHMS
 
 bearer_scheme = HTTPBearer()
 
+#Fetch JWS
 def get_jwks():
     url = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
     return requests.get(url).json()
