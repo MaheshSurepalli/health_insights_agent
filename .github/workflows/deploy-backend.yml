@@ -52,3 +52,19 @@ jobs:
           kubectl -n hia get svc hia-backend -o wide
           IP=$(kubectl -n hia get svc hia-backend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Backend EXTERNAL-IP: $IP"
+
+      - name: Debug on failure (pods, events, logs)
+        if: failure()
+        run: |
+          set +e
+          kubectl -n hia get pods -o wide
+          echo "----- Events -----"
+          kubectl -n hia describe deployment hia-backend | sed -n '/Events:/,$p'
+          echo "----- Pod Describes -----"
+          for p in $(kubectl -n hia get pods -l app=hia-backend -o name); do
+            echo "### $p"
+            kubectl -n hia describe $p | sed -n '/Events:/,$p'
+          done
+          echo "----- Container Logs (last 200 lines) -----"
+          kubectl -n hia logs -l app=hia-backend --tail=200 --all-containers=true
+
