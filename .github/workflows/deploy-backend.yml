@@ -1,0 +1,54 @@
+name: Deploy Backend to AKS
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - "k8s/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: {}
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${KUBE_CONFIG}" > $HOME/.kube/config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      # 1) Ensure namespace, svc, and deployment exist/are updated from repo
+      - name: Apply manifests with Kustomize
+        run: |
+          kubectl apply -k k8s/
+
+      # 2) Roll the backend deployment to the image built by this commit
+      - name: Set backend image to this commit
+        run: |
+          kubectl -n hia set image deployment/hia-backend \
+            api=${{ env.ACR_LOGIN_SERVER }}/health-insights-backend:${{ github.sha }}
+          kubectl -n hia rollout status deployment/hia-backend --timeout=180s
+
+      # 3) (Optional) Show public IP to help you test
+      - name: Show backend public IP
+        run: |
+          kubectl -n hia get svc hia-backend -o wide
+          IP=$(kubectl -n hia get svc hia-backend -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "Backend EXTERNAL-IP: $IP"
