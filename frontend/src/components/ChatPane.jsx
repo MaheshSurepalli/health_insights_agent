@@ -22,7 +22,7 @@ export default function ChatPane({ messages = [], sending = false, loading = fal
     []
   );
 
-  // Map backend messages -> Bubble.List items (content only; visuals come from roles)
+  // Map backend messages 
   const items = useMemo(() => {
     const arr = Array.isArray(messages) ? messages : [];
     return arr
