@@ -37,17 +37,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/login@v2
+      - name: Docker login to ACR (AAD via SP)
+        uses: docker/login-action@v3
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Show who/where we are
-        run: |
-            echo "Account:"; az account show -o table
-            echo "Registries I can see:"; az acr list -o table
-            echo "Try to resolve hiaacr:"; az acr show -n "${{ vars.ACR_NAME }}" -o table
-      - name: ACR login (AAD)
-        run: az acr login --name "${{ vars.ACR_NAME }}"
+            registry: ${{ secrets.ACR_LOGIN_SERVER }}
+            username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+            password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
@@ -65,17 +60,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/login@v2
+      # Log in to ACR directly with your Service Principal
+      - name: Docker login to ACR (AAD via SP)
+        uses: docker/login-action@v3
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+            registry: ${{ secrets.ACR_LOGIN_SERVER }}
+            username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+            password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
-      - name: Show who/where we are
-        run: |
-            echo "Account:"; az account show -o table
-            echo "Registries I can see:"; az acr list -o table
-            echo "Try to resolve hiaacr:"; az acr show -n "${{ vars.ACR_NAME }}" -o table
-      - name: ACR login (AAD)
-        run: az acr login --name "${{ vars.ACR_NAME }}"
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
