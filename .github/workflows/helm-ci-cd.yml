@@ -97,6 +97,7 @@ jobs:
           resource-group: hia-rg
           cluster-name: hia-aks
           use-kubelogin: true
+          admin: true
 
       - uses: azure/setup-helm@v4
 
