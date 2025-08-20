@@ -1,0 +1,46 @@
+name: Infra — Install NGINX Ingress
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  install-ingress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${KUBE_CONFIG}" > $HOME/.kube/config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Add ingress-nginx repo
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+
+      - name: Install/upgrade NGINX Ingress Controller
+        run: |
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace \
+            --set controller.publishService.enabled=true \
+            --set controller.service.type=LoadBalancer
+
+      - name: Get Ingress public IP
+        run: |
+          for i in {1..60}; do
+            IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [ -n "$IP" ]; then
+              echo "INGRESS_IP=$IP"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "No EXTERNAL-IP yet"
+          exit 1
