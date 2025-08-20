@@ -10,10 +10,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - healthinsights.eastus.cloudapp.azure.com
+        - http://healthinsights.eastus.cloudapp.azure.com/
       secretName: healthinsights-tls
   rules:
-    - host: healthinsights.eastus.cloudapp.azure.com
+    - host: http://healthinsights.eastus.cloudapp.azure.com/
       http:
         paths:
           - path: /api
