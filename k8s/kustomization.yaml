@@ -3,8 +3,9 @@ kind: Kustomization
 namespace: hia
 resources:
   - namespace.yaml
-  - identity/serviceaccount.yaml     
+  - identity/serviceaccount.yaml
   - backend/deployment.yaml
   - backend/service.yaml
   - frontend/deployment.yaml
   - frontend/service.yaml
+  - ingress/ingress.yaml     

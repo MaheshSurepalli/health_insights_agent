@@ -5,7 +5,7 @@ metadata:
   labels:
     app: hia-backend
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: hia-backend
   ports:
