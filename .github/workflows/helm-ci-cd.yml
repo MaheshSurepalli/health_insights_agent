@@ -86,6 +86,13 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Show who/where we are
+        run: |
+            echo "Account:"; az account show -o table
+            echo "Registries I can see:"; az acr list -o table
+            echo "Try to resolve hiaacr:"; az acr show -n "${{ vars.ACR_NAME }}" -o table
+
+
       # Get AKS context using OIDC (no kubeconfig secret needed)
       - uses: azure/aks-set-context@v4
         with:
