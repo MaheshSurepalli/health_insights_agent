@@ -16,18 +16,25 @@ spec:
       annotations:
         azure.workload.identity/use: "true"   # optional but harmless
     spec:
-      serviceAccountName: hia-backend-sa      # <— use the SA above
+      serviceAccountName: hia-backend-sa
       containers:
         - name: api
           image: hiaacr-abewdkh4fnczddgz.azurecr.io/health-insights-backend:latest
-          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: TZ
               value: "Asia/Kolkata"
-            - name: AZURE_CLIENT_ID            # <— lets DefaultAzureCredential select this MI
-              value: "0902ee40-c72c-4847-9df6-8eff222f54c7"
+            - name: AZURE_CLIENT_ID
+              value: "0902ee40-c72c-4847-9df6-8eff222f54c7"          # your UAMI client ID
+            - name: AZURE_TENANT_ID              # <<< add this
+              value: "d52c9ea1-7c21-47b1-82a3-33a74b1f74b8"        # Directory (tenant) ID
+            - name: AZURE_FEDERATED_TOKEN_FILE   # <<< add this (fallback)
+              value: "/var/run/secrets/azure/tokens/azure-identity-token"
+          volumeMounts:                           # <<< add these (fallback)
+            - name: azure-federated-token
+              mountPath: /var/run/secrets/azure/tokens
+              readOnly: true
           readinessProbe:
             httpGet: { path: /docs, port: 8080 }
             initialDelaySeconds: 10
@@ -36,3 +43,11 @@ spec:
             httpGet: { path: /docs, port: 8080 }
             initialDelaySeconds: 20
             periodSeconds: 20
+      volumes:                                    # <<< add this block (fallback)
+        - name: azure-federated-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: azure-identity-token
