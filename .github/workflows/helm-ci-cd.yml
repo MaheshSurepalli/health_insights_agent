@@ -1,0 +1,120 @@
+name: CI/CD — Build & Deploy (Helm on AKS)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "helm/hia/**"
+      - ".github/workflows/helm-ci-cd.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  build_backend:
+    if: ${{ needs.detect.outputs.backend == 'true' }}
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: ACR login (AAD)
+        run: |
+          ACR_NAME=$(echo "${{ secrets.ACR_LOGIN_SERVER }}" | cut -d. -f1)
+          az acr login --name "$ACR_NAME"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/health-insights-backend:${{ github.sha }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/health-insights-backend:latest
+
+  build_frontend:
+    if: ${{ needs.detect.outputs.frontend == 'true' }}
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: ACR login (AAD)
+        run: |
+          ACR_NAME=$(echo "${{ secrets.ACR_LOGIN_SERVER }}" | cut -d. -f1)
+          az acr login --name "$ACR_NAME"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/health-insights-frontend:${{ github.sha }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/health-insights-frontend:latest
+
+  deploy:
+    needs: [detect, build_backend, build_frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Log in to Azure using your Service Principal
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Get AKS context using OIDC (no kubeconfig secret needed)
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: hia-rg
+          cluster-name: hia-aks
+          use-kubelogin: true
+
+      - uses: azure/setup-helm@v4
+
+      - name: Helm upgrade/install
+        run: |
+          set -eux
+          CHART_DIR=helm/hia
+          EXTRA=""
+          # Only bump the image tag for components that changed (others keep values.yaml)
+          if [ "${{ needs.detect.outputs.backend }}" = "true" ]; then
+            EXTRA="$EXTRA --set backend.image.tag=${{ github.sha }}"
+          fi
+          if [ "${{ needs.detect.outputs.frontend }}" = "true" ]; then
+            EXTRA="$EXTRA --set frontend.image.tag=${{ github.sha }}"
+          fi
+          helm upgrade --install hia "$CHART_DIR" \
+            --namespace hia --create-namespace \
+            -f "$CHART_DIR/values.yaml" $EXTRA
+
+      - name: Show ingress & services
+        run: |
+          kubectl -n hia get ingress hia-app -o wide || true
+          kubectl -n hia get svc hia-frontend -o wide || true
+          kubectl -n hia get svc hia-backend -o wide || true

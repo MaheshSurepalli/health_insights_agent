@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hia-backend
+  namespace: {{ .Values.global.namespace }}
+  labels: { app: hia-backend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: hia-backend }
+  template:
+    metadata:
+      labels: { app: hia-backend }
+      annotations:
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: {{ .Values.backend.serviceAccount.name }}
+      volumes:
+        - name: azure-federated-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: azure-identity-token
+      containers:
+        - name: api
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports: [ { containerPort: {{ .Values.backend.service.targetPort }} } ]
+          env:
+            - name: TZ
+              value: "{{ .Values.global.timezone }}"
+            - name: AZURE_CLIENT_ID
+              value: "{{ .Values.backend.env.AZURE_CLIENT_ID }}"
+            - name: AZURE_TENANT_ID
+              value: "{{ .Values.backend.env.AZURE_TENANT_ID }}"
+            - name: AZURE_FEDERATED_TOKEN_FILE
+              value: "/var/run/secrets/azure/tokens/azure-identity-token"
+            - name: ALLOWED_ORIGINS
+              value: "{{ .Values.backend.env.ALLOWED_ORIGINS }}"
+          volumeMounts:
+            - name: azure-federated-token
+              mountPath: /var/run/secrets/azure/tokens
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /docs, port: {{ .Values.backend.service.targetPort }} }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /docs, port: {{ .Values.backend.service.targetPort }} }
+            initialDelaySeconds: 20
+            periodSeconds: 20

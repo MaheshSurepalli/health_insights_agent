@@ -1,0 +1,40 @@
+global:
+  namespace: hia
+  timezone: Asia/Kolkata
+
+ingress:
+  enabled: true
+  className: nginx
+  host: "healthinsights.eastus.cloudapp.azure.com"     # e.g., hia-dev-xyz.centralindia.cloudapp.azure.com
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+  # paths are fixed: / -> frontend, /api -> backend
+
+backend:
+  image:
+    repository: "hiaacr-abewdkh4fnczddgz.azurecr.io/health-insights-backend"  
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+    targetPort: 8080
+  env:
+    ALLOWED_ORIGINS: "https://healthinsights.eastus.cloudapp.azure.com"
+    AZURE_CLIENT_ID: "5b6c79d9-7d38-4fed-8284-c4ca7d5792da"
+    AZURE_TENANT_ID: "d52c9ea1-7c21-47b1-82a3-33a74b1f74b8"
+  resources: {}
+  serviceAccount:
+    name: hia-backend-sa
+    annotations:
+      azure.workload.identity/use: "true"
+      azure.workload.identity/client-id: "5b6c79d9-7d38-4fed-8284-c4ca7d5792da"
+
+frontend:
+  image:
+    repository: "hiaacr-abewdkh4fnczddgz.azurecr.io/health-insights-frontend"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+  resources: {}
