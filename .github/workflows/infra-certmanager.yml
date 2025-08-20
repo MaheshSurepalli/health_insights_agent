@@ -1,0 +1,41 @@
+name: Infra — Install cert-manager
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  install-cert-manager:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${KUBE_CONFIG}" > $HOME/.kube/config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Add jetstack repo
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+
+      - name: Install/upgrade cert-manager (+ CRDs)
+        run: |
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager --create-namespace \
+            --set crds.enabled=true
+
+      - name: Wait for cert-manager pods
+        run: |
+          for i in {1..60}; do
+            READY="$(kubectl -n cert-manager get deploy -o jsonpath='{range .items[*]}{.metadata.name}:{.status.readyReplicas}{" "}{end}')"
+            echo "Deployments ready: $READY"
+            if kubectl -n cert-manager get deploy | grep -E 'cert-manager|cainjector|webhook' | grep -vq "0/"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "cert-manager not ready"; kubectl -n cert-manager get pods; exit 1
