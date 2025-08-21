@@ -1,0 +1,17 @@
+image:
+  repository: hiaacr-abewdkh4fnczddgz.azurecr.io/frontend
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80        # service port exposed to cluster
+  targetPort: 80  # container port your image listens on (change if needed)
+
+pod:
+  containerPort: 80
+
+resources: {}
+env: []

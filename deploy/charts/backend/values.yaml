@@ -1,0 +1,28 @@
+image:
+  repository: hiaacr-abewdkh4fnczddgz.azurecr.io/backend
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80        # service port
+  targetPort: 8000  # container port exposed by the app
+
+pod:
+  containerPort: 8000
+
+resources: {}
+# resources:
+#   limits:
+#     cpu: "500m"
+#     memory: "512Mi"
+#   requests:
+#     cpu: "100m"
+#     memory: "128Mi"
+
+env: []
+# env:
+#   - name: PORT
+#     value: "8000"

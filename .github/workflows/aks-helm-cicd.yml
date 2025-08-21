@@ -1,0 +1,171 @@
+name: AKS Helm CI/CD (Changed Components Only)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: aks-helm-cicd
+  cancel-in-progress: true
+
+env:
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+  AKS_NAME: ${{ vars.AKS_NAME }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+  NAMESPACE: hia
+  # Optional: set a DNS host for gateway chart (leave empty to skip)
+  GATEWAY_HOST: ""
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Figure out what changed (build vs deploy granularity)
+      - name: Paths filter
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend_build:
+              - 'backend/**'
+            backend_deploy:
+              - 'backend/**'
+              - 'deploy/charts/backend/**'
+            frontend_build:
+              - 'frontend/**'
+            frontend_deploy:
+              - 'frontend/**'
+              - 'deploy/charts/frontend/**'
+            gateway:
+              - 'deploy/charts/gateway/**'
+
+      # ---------- Azure login ----------
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # ---------- ACR login ----------
+      - name: ACR login
+        run: az acr login -n "$ACR_NAME"
+
+      # ---------- Build & push images (only when sources changed) ----------
+      - name: Build & Push BACKEND image
+        if: steps.changes.outputs.backend_build == 'true'
+        run: |
+          docker build -t $ACR_LOGIN_SERVER/backend:${{ github.sha }} -t $ACR_LOGIN_SERVER/backend:latest ./backend
+          docker push $ACR_LOGIN_SERVER/backend:${{ github.sha }}
+          docker push $ACR_LOGIN_SERVER/backend:latest
+
+      - name: Build & Push FRONTEND image
+        if: steps.changes.outputs.frontend_build == 'true'
+        run: |
+          docker build -t $ACR_LOGIN_SERVER/frontend:${{ github.sha }} -t $ACR_LOGIN_SERVER/frontend:latest ./frontend
+          docker push $ACR_LOGIN_SERVER/frontend:${{ github.sha }}
+          docker push $ACR_LOGIN_SERVER/frontend:latest
+
+      # ---------- Get AKS context (non-admin) ----------
+      - name: Setup kubelogin
+        uses: azure/use-kubelogin@v1.2
+        with:
+          kubelogin-version: 'v0.0.31'
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_NAME }}
+          admin: 'false'
+          use-kubelogin: 'true'
+
+      # ---------- Helm + ingress-nginx ----------
+      - name: Setup Helm
+        uses: azure/setup-helm@v4.3.1
+
+      - name: Install/Upgrade ingress-nginx
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace
+
+      # ---------- Ensure app namespace exists ----------
+      - name: Ensure namespace
+        run: |
+          kubectl get ns $NAMESPACE >/dev/null 2>&1 || kubectl create ns $NAMESPACE
+
+      # ---------- Compute image tags to use for Helm ----------
+      - name: Compute BACKEND tag
+        id: tags
+        run: |
+          # If we built backend this run, use the immutable SHA; else use 'latest'
+          if [ "${{ steps.changes.outputs.backend_build }}" = "true" ]; then
+            echo "backendTag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "backendTag=latest" >> $GITHUB_OUTPUT
+          fi
+          if [ "${{ steps.changes.outputs.frontend_build }}" = "true" ]; then
+            echo "frontendTag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "frontendTag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      # ---------- Helm upgrades (only changed charts) ----------
+      - name: Deploy/Upgrade BACKEND (Helm)
+        if: steps.changes.outputs.backend_deploy == 'true'
+        run: |
+          helm upgrade --install backend deploy/charts/backend \
+            --namespace $NAMESPACE --create-namespace \
+            --set image.repository=$ACR_LOGIN_SERVER/backend \
+            --set image.tag=${{ steps.tags.outputs.backendTag }}
+
+      - name: Deploy/Upgrade FRONTEND (Helm)
+        if: steps.changes.outputs.frontend_deploy == 'true'
+        run: |
+          helm upgrade --install frontend deploy/charts/frontend \
+            --namespace $NAMESPACE --create-namespace \
+            --set image.repository=$ACR_LOGIN_SERVER/frontend \
+            --set image.tag=${{ steps.tags.outputs.frontendTag }}
+
+      # Gateway owns the Ingress. Install once, then only upgrade when the gateway chart changes.
+      # (Installing each run is also fine, but this avoids no-op revisions.)
+      - name: Check if gateway release exists
+        id: gw
+        run: |
+          if helm status gateway -n $NAMESPACE >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install gateway (first run)
+        if: steps.gw.outputs.exists == 'false'
+        run: |
+          helm upgrade --install gateway deploy/charts/gateway \
+            --namespace $NAMESPACE --create-namespace \
+            --set host="${GATEWAY_HOST}"
+
+      - name: Upgrade gateway (only when chart changed)
+        if: steps.gw.outputs.exists == 'true' && steps.changes.outputs.gateway == 'true'
+        run: |
+          helm upgrade gateway deploy/charts/gateway \
+            --namespace $NAMESPACE \
+            --set host="${GATEWAY_HOST}"
+
+      # ---------- Output ingress public IP ----------
+      - name: Show ingress public IP
+        run: |
+          echo "Waiting for ingress public IP..."
+          for i in {1..30}; do
+            IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [ -n "$IP" ]; then echo "Public IP: $IP"; break; fi
+            sleep 10
+          done

@@ -1,0 +1,21 @@
+ingressClassName: nginx
+
+# Optional: set a host (e.g., app.example.com). Leave empty for wildcard
+host: ""
+
+# Path rules
+paths:
+  backend:
+    path: /api
+    pathType: Prefix
+    serviceName: backend
+    servicePort: 80
+  frontend:
+    path: /
+    pathType: Prefix
+    serviceName: frontend
+    servicePort: 80
+
+annotations:
+  nginx.ingress.kubernetes.io/use-regex: "true"
+  nginx.ingress.kubernetes.io/rewrite-target: /$2
