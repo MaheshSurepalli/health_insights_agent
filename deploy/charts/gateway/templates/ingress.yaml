@@ -12,14 +12,14 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: {{ .Values.paths.backend.path }}(/|$)(.*)
+          - path: {{ .Values.paths.backend.path }}
             pathType: {{ .Values.paths.backend.pathType }}
             backend:
               service:
                 name: {{ .Values.paths.backend.serviceName }}
                 port:
                   number: {{ .Values.paths.backend.servicePort }}
-          - path: {{ .Values.paths.frontend.path }}(.*)
+          - path: {{ .Values.paths.frontend.path }}
             pathType: {{ .Values.paths.frontend.pathType }}
             backend:
               service:
