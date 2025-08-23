@@ -15,8 +15,8 @@ env:
   ACR_NAME: ${{ vars.ACR_NAME }}
   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
   NAMESPACE: hia
-  # Optional: set a DNS host for gateway chart (leave empty to skip)
-  GATEWAY_HOST: ""
+  # Domain for the Ingress host (set in repo → Settings → Secrets and variables → Actions → Variables)
+  GATEWAY_HOST: ${{ vars.GATEWAY_HOST }}
 
 jobs:
   build-and-deploy:
@@ -53,12 +53,11 @@ jobs:
 
       - name: Docker Login to ACR
         run: |
-          set -e  # Exit immediately if any command here fails
+          set -e
           echo "Logging in directly to $ACR_LOGIN_SERVER..."
           docker login $ACR_LOGIN_SERVER \
             -u ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }} \
             -p ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-
 
       # ---------- Build & push images (only when sources changed) ----------
       - name: Build & Push BACKEND image
@@ -100,7 +99,7 @@ jobs:
           helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
             --namespace ingress-nginx --create-namespace
 
-            # ---------- cert-manager (install once, idempotent) ----------
+      # ---------- cert-manager (install once, idempotent) ----------
       - name: Install/Upgrade cert-manager (CRDs included)
         run: |
           helm repo add jetstack https://charts.jetstack.io
@@ -147,7 +146,6 @@ jobs:
       - name: Compute BACKEND tag
         id: tags
         run: |
-          # If we built backend this run, use the immutable SHA; else use 'latest'
           if [ "${{ steps.changes.outputs.backend_build }}" = "true" ]; then
             echo "backendTag=${{ github.sha }}" >> $GITHUB_OUTPUT
           else
@@ -161,13 +159,11 @@ jobs:
 
       - name: Create/Update SP secret for backend (from AZURE_CREDENTIALS JSON)
         run: |
-          kubectl -n hia create secret generic azure-sp \
+          kubectl -n $NAMESPACE create secret generic azure-sp \
             --from-literal=AZURE_TENANT_ID='${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}' \
             --from-literal=AZURE_CLIENT_ID='${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}' \
             --from-literal=AZURE_CLIENT_SECRET='${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}' \
             --dry-run=client -o yaml | kubectl apply -f -
-
-
 
       # ---------- Helm upgrades (only changed charts) ----------
       - name: Deploy/Upgrade BACKEND (Helm)
@@ -176,7 +172,8 @@ jobs:
           helm upgrade --install backend deploy/charts/backend \
             --namespace $NAMESPACE --create-namespace \
             --set image.repository=$ACR_LOGIN_SERVER/backend \
-            --set image.tag=${{ steps.tags.outputs.backendTag }}
+            --set image.tag=${{ steps.tags.outputs.backendTag }} \
+            --wait --atomic --timeout 5m
 
       - name: Deploy/Upgrade FRONTEND (Helm)
         if: steps.changes.outputs.frontend_deploy == 'true'
@@ -184,10 +181,10 @@ jobs:
           helm upgrade --install frontend deploy/charts/frontend \
             --namespace $NAMESPACE --create-namespace \
             --set image.repository=$ACR_LOGIN_SERVER/frontend \
-            --set image.tag=${{ steps.tags.outputs.frontendTag }}
+            --set image.tag=${{ steps.tags.outputs.frontendTag }} \
+            --wait --atomic --timeout 5m
 
       # Gateway owns the Ingress. Install once, then only upgrade when the gateway chart changes.
-      # (Installing each run is also fine, but this avoids no-op revisions.)
       - name: Check if gateway release exists
         id: gw
         run: |
@@ -197,21 +194,39 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      # Fail fast if host not set (prevents empty TLS host rendering)
+      - name: Assert GATEWAY_HOST is set
+        run: |
+          if [ -z "${GATEWAY_HOST}" ]; then
+            echo "::error::GATEWAY_HOST is empty. Set repo variable GATEWAY_HOST to your domain (e.g., ai-healthinsights.net) in Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+
       - name: Install gateway (first run)
         if: steps.gw.outputs.exists == 'false'
         run: |
           helm upgrade --install gateway deploy/charts/gateway \
             --namespace $NAMESPACE --create-namespace \
-            --set host=${{ vars.GATEWAY_HOST}}
+            --set host="${GATEWAY_HOST}" \
+            --set tls.enabled=true \
+            --set tls.secretName=ai-healthinsights-tls \
+            --set annotations.cert-manager\\.io/cluster-issuer=letsencrypt-prod \
+            --set annotations.nginx\\.ingress\\.kubernetes\\.io/force-ssl-redirect=true \
+            --wait --atomic --timeout 5m
 
       - name: Upgrade gateway (only when chart changed)
         if: steps.gw.outputs.exists == 'true' && steps.changes.outputs.gateway == 'true'
         run: |
           helm upgrade gateway deploy/charts/gateway \
             --namespace $NAMESPACE \
-            --set host=${{ vars.GATEWAY_HOST}}
+            --set host="${GATEWAY_HOST}" \
+            --set tls.enabled=true \
+            --set tls.secretName=ai-healthinsights-tls \
+            --set annotations.cert-manager\\.io/cluster-issuer=letsencrypt-prod \
+            --set annotations.nginx\\.ingress\\.kubernetes\\.io/force-ssl-redirect=true \
+            --wait --atomic --timeout 5m
 
-      # ---------- Output ingress public IP ----------
+      # ---------- Output ingress public IP & wait for cert ----------
       - name: Show ingress public IP
         run: |
           echo "Waiting for ingress public IP..."
@@ -220,3 +235,18 @@ jobs:
             if [ -n "$IP" ]; then echo "Public IP: $IP"; break; fi
             sleep 10
           done
+
+      - name: Wait for TLS certificate (up to 5 minutes)
+        run: |
+          for i in {1..30}; do
+            READY=$(kubectl -n $NAMESPACE get certificate ai-healthinsights-tls -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [ "$READY" = "True" ]; then
+              echo "Certificate is Ready."
+              kubectl -n $NAMESPACE get certificate ai-healthinsights-tls
+              break
+            fi
+            echo "Waiting for certificate to be Ready... ($i/30)"
+            sleep 10
+          done
+          echo "Ingress detail:"
+          kubectl -n $NAMESPACE get ingress gateway -o wide || true
