@@ -23,9 +23,12 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.pod.containerPort }}
+          envFrom:
+            - secretRef:
+                name: azure-sp
+          {{- if .Values.env }}
           env:
-            {{- if .Values.env }}
             {{- toYaml .Values.env | nindent 12 }}
-            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
