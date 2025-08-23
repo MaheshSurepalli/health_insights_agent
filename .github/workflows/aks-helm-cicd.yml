@@ -121,13 +121,14 @@ jobs:
             echo "frontendTag=latest" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create/Update SP secret for backend
+      - name: Create/Update SP secret for backend (from AZURE_CREDENTIALS JSON)
         run: |
           kubectl -n hia create secret generic azure-sp \
-            --from-literal=AZURE_TENANT_ID='${{ secrets.AZURE_TENANT_ID }}' \
-            --from-literal=AZURE_CLIENT_ID='${{ secrets.AZURE_CLIENT_ID }}' \
-            --from-literal=AZURE_CLIENT_SECRET="{${{ secrets.AZURE_CLIENT_SECRET }}}" \
+            --from-literal=AZURE_TENANT_ID='${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}' \
+            --from-literal=AZURE_CLIENT_ID='${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}' \
+            --from-literal=AZURE_CLIENT_SECRET='${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}' \
             --dry-run=client -o yaml | kubectl apply -f -
+
 
 
       # ---------- Helm upgrades (only changed charts) ----------
