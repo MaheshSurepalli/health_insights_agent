@@ -17,4 +17,9 @@ paths:
     servicePort: 80
 
 annotations:
-  nginx.ingress.kubernetes.io/use-regex: "false"
+  nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+tls:
+  enabled: true
+  secretName: ai-healthinsights-tls
