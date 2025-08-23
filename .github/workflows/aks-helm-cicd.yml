@@ -202,14 +202,14 @@ jobs:
         run: |
           helm upgrade --install gateway deploy/charts/gateway \
             --namespace $NAMESPACE --create-namespace \
-            --set host="${GATEWAY_HOST}"
+            --set host=${{ vars.GATEWAY_HOST}}
 
       - name: Upgrade gateway (only when chart changed)
         if: steps.gw.outputs.exists == 'true' && steps.changes.outputs.gateway == 'true'
         run: |
           helm upgrade gateway deploy/charts/gateway \
             --namespace $NAMESPACE \
-            --set host="${GATEWAY_HOST}"
+            --set host=${{ vars.GATEWAY_HOST}}
 
       # ---------- Output ingress public IP ----------
       - name: Show ingress public IP
