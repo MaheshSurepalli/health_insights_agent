@@ -8,10 +8,10 @@ replicaCount: 1
 service:
   type: ClusterIP
   port: 80        # service port
-  targetPort: 8000  # container port exposed by the app
+  targetPort: 8080  # container port exposed by the app
 
 pod:
-  containerPort: 8000
+  containerPort: 8080
 
 resources: {}
 # resources:
