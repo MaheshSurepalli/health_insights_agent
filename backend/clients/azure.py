@@ -2,7 +2,7 @@ from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from config import AZURE_ENDPOINT, AGENT_ID
 
-# Foundry client
+# Foundry 
 project = AIProjectClient(
     credential=DefaultAzureCredential(),
     endpoint=AZURE_ENDPOINT

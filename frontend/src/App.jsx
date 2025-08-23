@@ -24,7 +24,7 @@ export default function App() {
   // Saved after file upload, used for /analyze
   const [lastBlob, setLastBlob] = useState(null); // { blobUrl, mimeType }
 
-  // Messages are the single source of truth for UI state.
+
   // IMPORTANT: no initialData here — we want a real "pending" state on first load.
   const messagesQ = useQuery({
     queryKey: ["messages"],
