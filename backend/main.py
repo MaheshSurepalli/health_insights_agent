@@ -6,7 +6,7 @@ from api.chat import router as chat_router
 from config import ALLOWED_ORIGINS
 from api.report import router as report_router
 
-app = FastAPI()
+app = FastAPI(root_path="/api")
 
 app.add_middleware(
     CORSMiddleware,
